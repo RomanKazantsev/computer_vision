@@ -2,26 +2,26 @@ from os.path import basename, join
 from skimage.io import imread
 from skimage.transform import resize
 from sklearn.preprocessing import StandardScaler
-#from keras.callbacks import ReduceLROnPlateau
 import numpy as np
 from numpy import array
-#from keras.models import Sequential
+from keras.models import Sequential
 from keras.layers.core import Dense, Dropout, Activation, Flatten
-#from keras.layers.convolutional import Conv2D
-#from keras.layers.pooling import MaxPooling2D
 #from keras.optimizers import SGD
-#from keras.callbacks import LearningRateScheduler, ModelCheckpoint, History
-#from keras.models import load_model
-#from keras.layers.normalization import BatchNormalization
-#from keras.layers import Dropout
+from keras.callbacks import LearningRateScheduler, ModelCheckpoint, History
+from keras.models import load_model
+from keras.layers.normalization import BatchNormalization
+from keras.layers import Dropout
 from os.path import basename, join
 from glob import glob
 from keras.callbacks import ModelCheckpoint
-#from keras.layers import GlobalAveragePooling2D
+from keras.layers import GlobalAveragePooling2D
+
 from keras.models import Model
 from keras.applications.resnet50 import ResNet50
 from keras.utils import print_summary
 from sklearn.model_selection import train_test_split
+from keras.preprocessing.image import ImageDataGenerator
+from keras.optimizers import RMSprop
 
 
 def train_classifier(train_gt, train_img_dir, fast_train = True):    
@@ -34,6 +34,7 @@ def train_classifier(train_gt, train_img_dir, fast_train = True):
     
     X = np.zeros([num_samples, new_height, new_width, 3])
     y = np.zeros([num_samples, num_classes])
+    yy = np.zeros([num_samples])
     
     count = 0
     for path in jpeg_list:
@@ -55,33 +56,43 @@ def train_classifier(train_gt, train_img_dir, fast_train = True):
         X[count] = image_resized
         class_ind = int(train_gt[basename(path)])
         y[count, class_ind] = 1
+        yy[count] = int(class_ind)
         
         count = count + 1
     
-    X_train = X
-    y_train = y
-    X_test = None
-    y_test = None
+    X_train, X_test, yy_train, yy_test = train_test_split(X, yy, test_size = 0.2,
+                                                        random_state = 2017, shuffle = True,
+                                                        stratify = yy)
+        
+    y_train = np.zeros([len(yy_train), num_classes])
     
-    if fast_train is not True:
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.2,
-                                                            random_state = 2017, shuffle = True,
-                                                            stratify = y)
+    for i in range(len(yy_train)):
+        class_ind = int(yy_train[i]) 
+        y_train[i, class_ind] = 1
+
+    y_test = np.zeros([len(yy_test), num_classes])        
+    for i in range(len(yy_test)):
+        class_ind = int(yy_test[i])
+        y_test[i, class_ind] = 1
     
     base_model = ResNet50(include_top = False, weights='imagenet', input_shape = [new_height, new_width, 3])
-    #print_summary(base_model)
     
     x = base_model.output
     x = Flatten()(x)
+    x = Dropout(0.3)(x)
     predictions = Dense(num_classes, activation = 'softmax')(x)
     model = Model(inputs=base_model.input, outputs=predictions)
     
+    num_layers = len(base_model.layers)
+    ind_layer = 1
     for layer in base_model.layers:
-        layer.trainable = False
+        if ind_layer < (num_layers - 7): # do not froze the last five layers
+            layer.trainable = False
+        ind_layer = ind_layer + 1
     
-    # compile the model (should be done *after* setting layers to non-trainable)
-    model.compile(optimizer = 'rmsprop', loss = 'categorical_crossentropy', metrics=['accuracy'])
-    #checkpointer = ModelCheckpoint(filepath = 'birds_model.hdf5', verbose = 1, save_best_only = True)
+    # compile the model
+    rmps_prop = RMSprop(lr=0.00001)
+    model.compile(optimizer = rmps_prop, loss = 'categorical_crossentropy', metrics=['accuracy'])
 
     epochs = 4000
     batch_size = 50
@@ -89,17 +100,12 @@ def train_classifier(train_gt, train_img_dir, fast_train = True):
     if fast_train is True:
         epochs = 1
     
-    # train the model on the new data
-    #print_summary(model)
     model.fit(X_train, y_train,
               batch_size=batch_size,
-    #          validation_data = (X_test, y_test),
+              validation_data = (X_test, y_test),
               epochs=epochs
-    #          ,callbacks = [checkpointer]
              )
 
-    #model.save("birds_model.hdf5")
-    
     pass
 
 
